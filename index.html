@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FPS V16: DEATH ANIMATIONS</title>
+    <title>FPS V18: BETTER EXPLOSIONS & BALANCED AI</title>
     <style>
         /* 배경색: 밝은 하늘색 */
         body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; user-select: none; touch-action: none; }
@@ -110,7 +110,7 @@
     <!-- 메뉴 -->
     <div id="menu" class="ui-layer interactive overlay-screen">
         <div class="panel">
-            <h1>TACTICAL V16</h1>
+            <h1>TACTICAL V18</h1>
             <h2>SELECT MODE & DIFFICULTY</h2>
             
             <div class="btn-grp">
@@ -147,7 +147,7 @@
 
         <div id="wep-list">
             <div class="w-item active" id="w0">1. ASSAULT RIFLE</div>
-            <div class="w-item" id="w1">2. SNIPER RIFLE</div>
+            <div class="w-item" id="w1">2. GRENADE LAUNCHER</div>
             <div class="w-item" id="w2">3. SMG</div>
             <div class="w-item" id="w3">4. SHOTGUN</div>
         </div>
@@ -179,17 +179,18 @@
         
         const WEAPONS = [
             { name: "ASSAULT RIFLE", type: 'auto', dmg: 9, rate: 600, ammo: 30, max: 30, spread: 0.02, zoom: 50, recoil: 0.005 },
-            { name: "SNIPER RIFLE", type: 'semi', dmg: 75, rate: 40, ammo: 5, max: 5, spread: 0.0001, zoom: 10, scope: true, recoil: 0.08 },
+            { name: "GRENADE LAUNCHER", type: 'semi', dmg: 100, rate: 70, ammo: 6, max: 6, spread: 0.04, zoom: 60, recoil: 0.15, isGL: true, speed: 40 },
             { name: "SMG", type: 'auto', dmg: 4.5, rate: 1000, ammo: 40, max: 40, spread: 0.06, zoom: 55, recoil: 0.003 },
             { name: "SHOTGUN", type: 'semi', dmg: 5, rate: 80, ammo: 8, max: 8, spread: 0.08, zoom: 60, pellets: 10, recoil: 0.04 }
         ];
 
         let scene, camera, renderer, clock;
-        // dying: 쓰러지는 중인지 체크하는 플래그
         let player = { pos: new THREE.Vector3(0,2,100), vel: new THREE.Vector3(), rot: new THREE.Euler(0,0,0,'YXZ'), hp: 300, maxHp: 300, dead: false, dying: false, canJump: false };
         let enemy = { mesh: null, hp: 200, dead: false, dying: false, vel: new THREE.Vector3(), wIdx: 0, ammo: 30, nextShot: 0, reloadEnd: 0, swapEnd: 0, state: 'SEARCH', targetPos: new THREE.Vector3() };
         
         let walls = [];
+        let projectiles = []; 
+        let particles = []; // 이펙트 파티클 배열
         let curWep = 0;
         let lastFire = 0;
         let isReloading = false;
@@ -252,24 +253,29 @@
         function resetMission() {
             player.hp = player.maxHp;
             player.dead = false;
-            player.dying = false; // 플래그 초기화
+            player.dying = false;
             player.pos.set(0, 2, 100);
             player.vel.set(0,0,0);
             player.rot.set(0,0,0,'YXZ');
-            camera.rotation.set(0,0,0); // 카메라 회전 초기화
+            camera.rotation.set(0,0,0);
             document.getElementById('hp-val').innerText = player.hp;
 
             enemy.hp = 200; 
             enemy.dead = false;
-            enemy.dying = false; // 플래그 초기화
+            enemy.dying = false;
             enemy.state = 'SEARCH';
             enemy.vel.set(0,0,0);
             enemy.wIdx = 0;
             
+            projectiles.forEach(p => scene.remove(p.mesh));
+            projectiles = [];
+            particles.forEach(p => scene.remove(p.mesh));
+            particles = [];
+
             if(enemy.mesh) {
                 scene.add(enemy.mesh);
                 enemy.mesh.position.set(0, 2, -100);
-                enemy.mesh.rotation.set(0,0,0); // 적 회전 초기화
+                enemy.mesh.rotation.set(0,0,0);
                 enemy.mesh.visible = true;
                 enemy.mesh.remove(enemyGunMesh);
                 enemyGunMesh = genGun(0);
@@ -357,10 +363,9 @@
             const mBlack = new THREE.MeshStandardMaterial({color:0x222222, roughness:0.4, metalness:0.7});
             const mGrey = new THREE.MeshStandardMaterial({color:0x555555, roughness:0.5, metalness:0.5});
             const mWood = new THREE.MeshStandardMaterial({color:0x8B4513, roughness:0.7});
-            const mGreen = new THREE.MeshStandardMaterial({color:0x2F4F2F, roughness:0.6});
-            const mSilver = new THREE.MeshStandardMaterial({color:0xBBBBBB, roughness:0.3, metalness:0.8});
+            const mDarkGrey = new THREE.MeshStandardMaterial({color:0x333333, roughness:0.6});
 
-            if(type === 0) { 
+            if(type === 0) { // Rifle
                 const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.4), mBlack);
                 const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5), mGrey);
                 barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.02, -0.45);
@@ -378,23 +383,24 @@
                 rearSight.position.set(0, 0.09, 0.05);
                 g.add(body, barrel, guard, mag, grip, stock, sight, rearSight);
             } 
-            else if(type === 1) { 
-                const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.6), mGreen);
-                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.9), mBlack);
-                barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.03, -0.75);
-                const scopeBase = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.1), mBlack);
-                scopeBase.position.set(0, 0.07, 0);
-                const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.4), mBlack);
-                scopeTube.rotation.x = Math.PI/2; scopeTube.position.set(0, 0.1, -0.05);
-                const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.025), mSilver);
-                bolt.position.set(0.06, 0.05, 0.15);
-                const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.4), mGreen);
-                stock.position.set(0, -0.02, 0.5);
-                const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.05), mBlack);
-                buttPad.position.set(0, -0.02, 0.7);
-                g.add(body, barrel, scopeBase, scopeTube, bolt, stock, buttPad);
+            else if(type === 1) { // == GRENADE LAUNCHER (MGL Style) ==
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.3), mBlack);
+                const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.2, 8), mDarkGrey);
+                cyl.rotation.x = Math.PI/2; cyl.position.set(0, 0, 0);
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4), mBlack);
+                barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0, -0.35);
+                const stock = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.4), mBlack);
+                stock.position.set(0, 0.05, 0.35);
+                stock.rotation.x = -0.1;
+                const vGrip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.05), mBlack);
+                vGrip.position.set(0, -0.15, -0.2);
+                const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.06), mBlack);
+                grip.position.set(0, -0.15, 0.15); grip.rotation.x = -0.2;
+                const sight = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.02), mGrey);
+                sight.position.set(0, 0.12, 0);
+                g.add(frame, cyl, barrel, stock, vGrip, grip, sight);
             }
-            else if(type === 2) { 
+            else if(type === 2) { // SMG
                 const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.15, 0.3), mBlack);
                 const silencer = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3), mGrey);
                 silencer.rotation.x = Math.PI/2; silencer.position.set(0, 0.02, -0.3);
@@ -406,7 +412,7 @@
                 stock.position.set(0.05, 0.02, 0.3);
                 g.add(body, silencer, mag, vGrip, stock);
             }
-            else { 
+            else { // Shotgun
                 const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.3), mGrey);
                 const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8), mBlack);
                 barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.04, -0.55);
@@ -552,12 +558,10 @@
         function updateAmmo() { document.getElementById('ammo-val').innerText=`${WEAPONS[curWep].ammo}/${WEAPONS[curWep].max}`; }
 
         function updatePlayer(dt, time) {
-            // 플레이어 사망 애니메이션 중이면 움직임 멈추고 카메라만 조작
             if(player.dying) {
-                // 카메라가 바닥으로 떨어지고 기울어짐
                 camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0.5, dt * 2); 
-                camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0.8, dt * 2); // 옆으로 쓰러짐
-                camera.rotation.x = THREE.MathUtils.lerp(camera.rotation.x, -0.2, dt * 2); // 하늘을 보거나 땅을 보는 각도
+                camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0.8, dt * 2); 
+                camera.rotation.x = THREE.MathUtils.lerp(camera.rotation.x, -0.2, dt * 2); 
                 return;
             }
 
@@ -565,10 +569,9 @@
             const w = WEAPONS[curWep];
             const isAim = input.aim && !isReloading;
             
-            // 자동 발사
             let autoLocked = false;
-            if(CFG.mode === 'mob') { // PC 자동발사 제거 (요청에 없음)
-                if(!isReloading) {
+            if(CFG.mode === 'mob') { 
+                if(!isReloading && !w.isGL) {
                     const ray = new THREE.Raycaster(camera.position, camera.getWorldDirection(new THREE.Vector3()));
                     const hits = ray.intersectObjects([...walls, enemy.mesh], true);
                     if(hits.length > 0) {
@@ -660,50 +663,201 @@
             player.rot.x += w.recoil; 
             recoilOffset = 0.15; 
 
-            const pellets = w.pellets || 1;
-            for(let i=0; i<pellets; i++) {
-                const spread = input.aim ? w.spread*0.3 : w.spread;
-                const dev = new THREE.Vector3((Math.random()-0.5)*spread, (Math.random()-0.5)*spread, (Math.random()-0.5)*spread);
-                const dir = camera.getWorldDirection(new THREE.Vector3()).add(dev).normalize();
-                
-                const ray = new THREE.Raycaster(camera.position, dir);
-                const hits = ray.intersectObjects([...walls, enemy.mesh], true);
-                let end = camera.position.clone().add(dir.multiplyScalar(200));
+            if(w.isGL) {
+                const dir = camera.getWorldDirection(new THREE.Vector3());
+                dir.y += 0.05; 
+                spawnGrenade(gunMesh.getWorldPosition(new THREE.Vector3()), dir, true, w);
+            } 
+            else {
+                const pellets = w.pellets || 1;
+                for(let i=0; i<pellets; i++) {
+                    const spread = input.aim ? w.spread*0.3 : w.spread;
+                    const dev = new THREE.Vector3((Math.random()-0.5)*spread, (Math.random()-0.5)*spread, (Math.random()-0.5)*spread);
+                    const dir = camera.getWorldDirection(new THREE.Vector3()).add(dev).normalize();
+                    
+                    const ray = new THREE.Raycaster(camera.position, dir);
+                    const hits = ray.intersectObjects([...walls, enemy.mesh], true);
+                    let end = camera.position.clone().add(dir.multiplyScalar(200));
 
-                if(hits.length>0) {
-                    end = hits[0].point;
-                    const o = hits[0].object;
-                    if(enemy.mesh && (o===enemy.mesh || o.parent===enemy.mesh) && !enemy.dying) {
-                        enemy.hp -= w.dmg; 
-                        fx(end, 0xff0000);
-                        if(enemy.hp<=0 && !enemy.dead) {
-                            enemy.dying = true; // 쓰러지는 애니메이션 시작
-                            // 2초 후 게임 종료 처리
-                            setTimeout(()=>{
-                                enemy.dead = true; 
-                                scene.remove(enemy.mesh);
-                                endGame(true);
-                            }, 2000);
-                        }
-                    } else fx(end, 0xffff00);
+                    if(hits.length>0) {
+                        end = hits[0].point;
+                        const o = hits[0].object;
+                        if(enemy.mesh && (o===enemy.mesh || o.parent===enemy.mesh) && !enemy.dying) {
+                            enemy.hp -= w.dmg; 
+                            fx(end, 0xff0000);
+                            if(enemy.hp<=0 && !enemy.dead) {
+                                enemy.dying = true;
+                                setTimeout(()=>{
+                                    enemy.dead = true; 
+                                    scene.remove(enemy.mesh);
+                                    endGame(true);
+                                }, 2000);
+                            }
+                        } else fx(end, 0xffff00);
+                    }
+                    const start = gunMesh.getWorldPosition(new THREE.Vector3());
+                    start.add(new THREE.Vector3(0,0.1,-0.5).applyQuaternion(camera.quaternion));
+                    line(start, end, 0xffaa00);
                 }
-                const start = gunMesh.getWorldPosition(new THREE.Vector3());
-                start.add(new THREE.Vector3(0,0.1,-0.5).applyQuaternion(camera.quaternion));
-                line(start, end, 0xffaa00);
             }
         }
 
-        // === AI (Search & Destroy) ===
+        // === 유탄 및 이펙트 관련 개선 ===
+        function createGrenadeMesh() {
+            const g = new THREE.Group();
+            // 금색 탄피 (몸체)
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8), new THREE.MeshStandardMaterial({color:0xD4AF37, metalness:0.8, roughness:0.2}));
+            body.rotation.x = Math.PI/2;
+            // 녹색 탄두 (머리)
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.078, 8, 8), new THREE.MeshStandardMaterial({color:0x2F4F2F, roughness:0.8}));
+            head.position.z = -0.12; 
+            head.scale.set(1, 1, 1.2);
+            // 꼬리 부분
+            const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 8), new THREE.MeshStandardMaterial({color:0x333333}));
+            tail.rotation.x = Math.PI/2; tail.position.z = 0.12;
+            
+            g.add(body, head, tail);
+            return g;
+        }
+
+        function spawnGrenade(pos, dir, isPlayer, w) {
+            const mesh = createGrenadeMesh();
+            mesh.position.copy(pos);
+            // 날아가는 방향을 보도록
+            mesh.lookAt(pos.clone().add(dir));
+            scene.add(mesh);
+            projectiles.push({
+                mesh: mesh,
+                vel: dir.normalize().multiplyScalar(w.speed),
+                isPlayer: isPlayer,
+                dmg: w.dmg
+            });
+        }
+
+        function updateEffects(dt) {
+            // 유탄 업데이트
+            for(let i = projectiles.length-1; i>=0; i--) {
+                const p = projectiles[i];
+                p.vel.y -= 20 * dt; // 중력
+                
+                const prevPos = p.mesh.position.clone();
+                const nextPos = prevPos.clone().add(p.vel.clone().multiplyScalar(dt));
+                
+                // 유탄 회전 (투사체처럼 회전)
+                p.mesh.rotation.x += 10 * dt;
+                
+                const dist = prevPos.distanceTo(nextPos);
+                const dir = nextPos.clone().sub(prevPos).normalize();
+                const ray = new THREE.Raycaster(prevPos, dir, 0, dist);
+                const hits = ray.intersectObjects([...walls, new THREE.Mesh(new THREE.PlaneGeometry(1000,1000).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial())], true);
+                
+                let targetHit = false;
+                if(p.isPlayer && enemy.mesh && !enemy.dead) {
+                    const eHits = ray.intersectObject(enemy.mesh, true);
+                    if(eHits.length > 0) { hits.unshift(eHits[0]); targetHit = true; }
+                } else if(!p.isPlayer && !player.dead) {
+                    const pDist = prevPos.distanceTo(player.pos);
+                    if(pDist < 1.5) {
+                        explode(prevPos, p.dmg, false);
+                        scene.remove(p.mesh);
+                        projectiles.splice(i, 1);
+                        continue;
+                    }
+                }
+
+                if(hits.length > 0) {
+                    explode(hits[0].point, p.dmg, p.isPlayer);
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                } else {
+                    p.mesh.position.copy(nextPos);
+                    if(p.mesh.position.y < -5 || p.mesh.position.length() > 300) {
+                        scene.remove(p.mesh);
+                        projectiles.splice(i, 1);
+                    }
+                }
+            }
+
+            // 파티클 업데이트
+            for(let i = particles.length-1; i>=0; i--) {
+                const p = particles[i];
+                p.life -= dt;
+                if(p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                if(p.type === 'expand') {
+                    p.mesh.scale.multiplyScalar(1 + p.speed * dt);
+                    p.mesh.material.opacity = p.life / p.maxLife * 0.8;
+                } else if(p.type === 'debris') {
+                    p.vel.y -= 20 * dt; // 중력
+                    p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
+                    p.mesh.rotation.x += p.rot.x * dt;
+                    p.mesh.rotation.y += p.rot.y * dt;
+                    p.mesh.scale.multiplyScalar(0.95);
+                    if(p.mesh.position.y < 0) { p.mesh.position.y = 0; p.vel.y = -p.vel.y*0.5; p.vel.x*=0.8; p.vel.z*=0.8; }
+                }
+            }
+        }
+
+        function explode(pos, dmg, isSourcePlayer) {
+            // 1. 섬광 (Core)
+            const core = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({color:0xffffaa, transparent:true}));
+            core.position.copy(pos);
+            scene.add(core);
+            particles.push({ mesh: core, type: 'expand', speed: 10, life: 0.1, maxLife: 0.1 });
+
+            // 2. 화염구 (Fireball)
+            const fire = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 12), new THREE.MeshBasicMaterial({color:0xff5500, transparent:true}));
+            fire.position.copy(pos);
+            scene.add(fire);
+            particles.push({ mesh: fire, type: 'expand', speed: 3, life: 0.5, maxLife: 0.5 });
+
+            // 3. 파편 (Debris)
+            const debrisMat = new THREE.MeshStandardMaterial({color:0x333333});
+            const debrisGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            for(let i=0; i<8; i++) {
+                const d = new THREE.Mesh(debrisGeo, debrisMat);
+                d.position.copy(pos);
+                scene.add(d);
+                const vel = new THREE.Vector3((Math.random()-0.5), Math.random()+0.5, (Math.random()-0.5)).normalize().multiplyScalar(Math.random()*15+5);
+                particles.push({ mesh: d, type: 'debris', vel: vel, rot: {x:Math.random()*10, y:Math.random()*10}, life: 1.5, maxLife: 1.5 });
+            }
+
+            // 데미지 처리
+            const range = 7;
+            if(enemy.mesh && !enemy.dead && !enemy.dying) {
+                if(pos.distanceTo(enemy.mesh.position) < range && isSourcePlayer) {
+                    enemy.hp -= dmg;
+                    if(enemy.hp<=0) {
+                        enemy.dying = true;
+                        setTimeout(()=>{ enemy.dead=true; scene.remove(enemy.mesh); endGame(true); }, 2000);
+                    }
+                }
+            }
+            if(!player.dead && !player.dying) {
+                if(pos.distanceTo(player.pos) < range) {
+                    player.hp -= dmg;
+                    document.getElementById('hp-val').innerText = Math.max(0, Math.floor(player.hp));
+                    const s = document.getElementById('dmg-screen');
+                    s.style.opacity=1; setTimeout(()=>s.style.opacity=0, 150);
+                    if(player.hp<=0) {
+                        player.dying = true;
+                        setTimeout(() => { player.dead=true; endGame(false); }, 2000);
+                    }
+                }
+            }
+        }
+
+        // === AI Update ===
         function updateEnemy(dt, time) {
             if(enemy.dead || !enemy.mesh) return;
-            
-            // 적이 죽어가는 중이면 뒤로 넘어지는 애니메이션
             if(enemy.dying) {
-                // 회전: X축으로 뒤로 넘어짐
                 enemy.mesh.rotation.x = THREE.MathUtils.lerp(enemy.mesh.rotation.x, -Math.PI/2, dt * 3);
-                // 위치: 살짝 아래로 내려가서 묻히는 느낌
                 enemy.mesh.position.y = THREE.MathUtils.lerp(enemy.mesh.position.y, 0.5, dt * 3);
-                return; // 다른 로직 실행 안함
+                return;
             }
 
             enemy.vel.y -= 30 * dt;
@@ -721,7 +875,6 @@
             const canSee = (hits.length===0 || hits[0].distance > dist) && !player.dying;
 
             if(canSee) {
-                // COMBAT
                 enemy.state = 'COMBAT';
                 enemy.mesh.lookAt(player.pos.x, enemy.mesh.position.y, player.pos.z);
                 
@@ -739,7 +892,7 @@
                     if(time > enemy.nextShot) {
                         enemy.nextShot = time + (60000/w.rate);
                         enemy.ammo--;
-                        enemyFire(w);
+                        enemyFire(w, dist); // 거리 정보 전달
                     }
                 } else {
                     if(time > enemy.reloadEnd) {
@@ -759,7 +912,6 @@
                     enemy.ammo = WEAPONS[enemy.wIdx].max;
                 }
             } else {
-                // SEARCH
                 enemy.state = 'SEARCH';
                 if(enemy.mesh.position.distanceTo(enemy.targetPos) < 2) pickRandomDest();
                 
@@ -775,8 +927,28 @@
             }
         }
 
-        function enemyFire(w) {
+        function enemyFire(w, dist) {
             if(player.dying) return;
+            
+            // 유탄 발사 시 거리별 정확도 너프 적용
+            if(w.isGL) {
+                const dir = player.pos.clone().sub(enemy.mesh.position).normalize();
+                
+                // 너프 로직: 거리가 가까울수록(30m 이내) 랜덤 오차가 크게 발생
+                let inaccuracy = 0.05; // 기본 오차
+                if(dist < 30) inaccuracy = 0.3; // 근접 시 매우 큰 오차 (빗나감)
+                else if(dist < 50) inaccuracy = 0.15;
+
+                dir.x += (Math.random() - 0.5) * inaccuracy;
+                dir.y += 0.1 + (Math.random() * 0.05); // 높이도 약간 랜덤
+                dir.z += (Math.random() - 0.5) * inaccuracy;
+                dir.normalize();
+
+                spawnGrenade(enemy.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), dir, false, w);
+                return;
+            }
+
+            // 일반 무기 히트스캔
             const spread = w.spread * 1.5; 
             const dir = player.pos.clone().sub(enemy.mesh.position).normalize();
             dir.x += (Math.random()-0.5)*spread;
@@ -808,12 +980,8 @@
                     s.style.opacity=1; setTimeout(()=>s.style.opacity=0, 150);
                     
                     if(player.hp<=0 && !player.dead && !player.dying) { 
-                        player.dying = true; // 플레이어 쓰러짐 시작
-                        // 2초 뒤 결과창
-                        setTimeout(() => {
-                            player.dead = true; 
-                            endGame(false);
-                        }, 2000);
+                        player.dying = true;
+                        setTimeout(() => { player.dead = true; endGame(false); }, 2000);
                     }
                 }
             }
@@ -829,7 +997,7 @@
             const dt = Math.min(clock.getDelta(), 0.1);
             const time = performance.now();
             
-            // 플레이어가 죽어도 updatePlayer는 호출하여 카메라는 움직이게 함
+            updateEffects(dt); // 이펙트 및 유탄 통합 업데이트
             updatePlayer(dt, time/1000);
             updateEnemy(dt, time);
             renderer.render(scene, camera);
